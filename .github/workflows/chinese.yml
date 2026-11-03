@@ -1,0 +1,30 @@
+name: Chinese gap check
+
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/check_chinese.py', '.github/workflows/chinese.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  chinese:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install opencc
+      - run: python3 scripts/check_chinese.py --cache /tmp/cache --out report-chinese.md
+      - name: Commit report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898732+github-actions[bot]@users.noreply.github.com"
+          git add report-chinese.md
+          git diff --cached --quiet || git commit -m "Update Chinese gap report"
+          git pull --rebase
+          git push
