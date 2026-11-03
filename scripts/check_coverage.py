@@ -92,19 +92,25 @@ def usable_gloss(sense: dict) -> str | None:
     return g
 
 
-def load_edition(path: Path, english_only: bool = True):
+def load_edition(paths: list[Path], english_only: bool = True):
     heads: dict[str, dict] = {}          # lowercased headword -> stats
     forms: dict[str, set[str]] = defaultdict(set)  # lowercased form -> headwords
     broken = 0
     total_senses = 0
     glosses: list[str] = []
-    with open_jsonl(path) as f:
-        for line in f:
+    skipped: Counter = Counter()
+    def lines():
+        for path in paths:
+            with open_jsonl(path) as f:
+                yield from f
+    if True:
+        for line in lines():
             try:
                 e = json.loads(line)
             except json.JSONDecodeError:
                 continue
             if english_only and e.get('lang_code') not in (None, 'en'):
+                skipped[e.get('lang_code')] += 1
                 continue
             word = (e.get('word') or '').strip()
             if not word:
@@ -132,6 +138,8 @@ def load_edition(path: Path, english_only: bool = True):
                 form = (fm.get('form') or '').strip().lower()
                 if form and ' ' not in form and form != key:
                     forms[form].add(key)
+    if skipped:
+        print(f'  skipped non-English entries: {skipped.most_common(5)}', file=sys.stderr)
     return heads, forms, broken, total_senses, glosses
 
 
@@ -210,27 +218,23 @@ def main() -> None:
                 'covered when they are listed as a form of a defined headword.\n']
     for code, label in (('ja', 'Japanese (ja.wiktionary)'), ('zh', 'Chinese (zh.wiktionary)')):
         override = getattr(args, f'{code}_url')
-        existing = sorted(cache.glob(f'{code}-english.jsonl*'))
-        if existing:
-            path = existing[0]
-        elif args.offline:
+        paths = sorted(cache.glob(f'{code}-english*.jsonl*'))
+        if not paths and args.offline:
             sections.append(f'## {label}\n\nNo cached file.\n')
             continue
-        else:
-            url = override
-            if not url:
-                cfg = EDITIONS[code]
-                for lang in cfg['langs']:
-                    url = find_jsonl_url(cfg['edition'], lang)
-                    if url:
-                        break
-            if not url:
+        if not paths:
+            cfg = EDITIONS[code]
+            urls = [override] if override else [u for u in (find_jsonl_url(cfg['edition'], l) for l in cfg['langs']) if u]
+            if not urls:
                 sections.append(f'## {label}\n\nCould not find the download; pass --{code}-url.\n')
                 continue
-            path = cache / (f'{code}-english.jsonl' + ('.gz' if url.endswith('.gz') else ''))
-            fetch(url, path)
-        print(f'  reading {path}', file=sys.stderr)
-        sections.append(report(label, *load_edition(path), freq))
+            for i, url in enumerate(urls):
+                path = cache / (f'{code}-english{i}.jsonl' + ('.gz' if url.endswith('.gz') else ''))
+                fetch(url, path)
+                paths.append(path)
+        sections.append(f'<!-- {label} sources: {len(paths)} file(s) -->')
+        print(f'  reading {paths}', file=sys.stderr)
+        sections.append(report(label, *load_edition(paths), freq))
 
     text = '\n'.join(sections)
     Path(args.out).write_text(text, encoding='utf-8')
