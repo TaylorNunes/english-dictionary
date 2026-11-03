@@ -1,0 +1,29 @@
+name: Coverage check
+
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/check_coverage.py', '.github/workflows/coverage.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install opencc
+      - run: python3 scripts/check_coverage.py --cache /tmp/cache --out report.md
+      - name: Commit report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898732+github-actions[bot]@users.noreply.github.com"
+          git add report.md
+          git diff --cached --quiet || git commit -m "Update coverage report"
+          git push
